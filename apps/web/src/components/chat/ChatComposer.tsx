@@ -2685,6 +2685,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerHasNonPromptContent = composerDraft
     ? composerDraftHasUserContent({ ...composerDraft, prompt: "" })
     : false;
+  // Mirrors ChatView's typed `/side` check: only a leading command on a
+  // prompt-only draft, outside an agent question or a queued-message edit.
+  const sideCommandsRunnable =
+    !composerHasNonPromptContent && activePendingProgress === null && !isEditingQueuedMessage;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
@@ -2716,11 +2720,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: "Switch response model for this thread",
         },
-        // Match the typed-command path in ChatView: only a leading command on
-        // a prompt-only draft opens a side chat, so offer it only there.
-        ...(props.onSideChatCommand &&
-        composerTrigger.rangeStart === 0 &&
-        !composerHasNonPromptContent
+        ...(props.onSideChatCommand && composerTrigger.rangeStart === 0 && sideCommandsRunnable
           ? ([
               {
                 id: "slash:side",
@@ -2861,7 +2861,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     activeThreadId,
     props.onSideChatCommand,
-    composerHasNonPromptContent,
+    sideCommandsRunnable,
     compactSlashCommandAvailable,
     composerTrigger,
     environmentId,
@@ -4065,7 +4065,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if ((item.command === "side" || item.command === "btw") && onSideChatCommand) {
           // The menu hides these unless they can run, but a stale item can still be
           // picked after the draft changes. Then keep the command as plain text.
-          if (trigger.rangeStart !== 0 || composerHasNonPromptContent) {
+          if (trigger.rangeStart !== 0 || !sideCommandsRunnable) {
             const replacement = `/${item.command} `;
             const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
               snapshot.value,
@@ -4232,7 +4232,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       planModeUiEnabled,
       onUsageLimitsCommand,
       onSideChatCommand,
-      composerHasNonPromptContent,
+      sideCommandsRunnable,
       resolveActiveComposerTrigger,
     ],
   );
