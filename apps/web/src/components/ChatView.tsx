@@ -255,6 +255,7 @@ import {
   selectThreadPanelOpen,
   selectThreadRightPanelState,
   type RightPanelSurface,
+  registerEmbeddedPanelHost,
   useRightPanelStore,
 } from "../rightPanelStore";
 import {
@@ -866,8 +867,6 @@ type ChatViewProps =
        * terminals or global shortcuts of its own, and no nested side chats.
        */
       embedded?: boolean;
-      /** The host thread whose right panel shows what an embedded side chat opens. */
-      panelOwnerRef?: ScopedThreadRef;
     }
   | {
       environmentId: EnvironmentId;
@@ -878,7 +877,6 @@ type ChatViewProps =
       routeKind: "draft";
       draftId: DraftId;
       embedded?: never;
-      panelOwnerRef?: never;
     };
 
 interface TerminalLaunchContext {
@@ -1615,7 +1613,6 @@ export default function ChatView(props: ChatViewProps) {
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
     embedded = false,
-    panelOwnerRef,
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
@@ -3821,14 +3818,12 @@ export default function ChatView(props: ChatViewProps) {
   );
   const openFileAttachment = useCallback(
     (attachment: ChatFileAttachment) => {
-      // A side chat has no panel of its own; its attachments open in the host's.
-      const panelRef = panelOwnerRef ?? activeThreadRef;
-      if (panelRef) {
-        useRightPanelStore.getState().openAttachment(panelRef, attachment);
+      if (activeThreadRef) {
+        useRightPanelStore.getState().openAttachment(activeThreadRef, attachment);
         return;
       }
     },
-    [activeThreadRef, panelOwnerRef],
+    [activeThreadRef],
   );
   const serverAttachmentResources = useMemo(
     () =>
@@ -4661,7 +4656,12 @@ export default function ChatView(props: ChatViewProps) {
       );
     }
   }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
-  useEffect(() => subscribeSnapShotComposerFocus(focusComposer), [focusComposer]);
+  // SnapShot captures land in the route thread's draft, so a side chat never
+  // takes the focus that follows one.
+  useEffect(
+    () => (embedded ? undefined : subscribeSnapShotComposerFocus(focusComposer)),
+    [embedded, focusComposer],
+  );
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -6935,7 +6935,8 @@ export default function ChatView(props: ChatViewProps) {
   // terminal is a surface and is recognized by the predicate instead. Mobile is left alone so
   // returning to the app does not raise the keyboard.
   useEffect(() => {
-    if (!activeThread?.id || terminalUiState.terminalOpen || isMobileViewport) return;
+    // The host thread owns refocus; two composers would race for it.
+    if (embedded || !activeThread?.id || terminalUiState.terminalOpen || isMobileViewport) return;
     let frame: number | null = null;
     const onWindowFocus = () => {
       if (frame !== null) window.cancelAnimationFrame(frame);
@@ -6956,7 +6957,7 @@ export default function ChatView(props: ChatViewProps) {
       window.removeEventListener("focus", onWindowFocus);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, isMobileViewport, terminalUiState.terminalOpen]);
+  }, [activeThread?.id, embedded, focusComposer, isMobileViewport, terminalUiState.terminalOpen]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -12350,12 +12351,16 @@ function SideChatPanel(props: { parentRef: ScopedThreadRef; threadId: ThreadId }
       useRightPanelStore.getState().closeSurface(props.parentRef, `aside:${props.threadId}`);
     }
   }, [gone, props.parentRef, props.threadId]);
+  // Files and attachments this side chat opens show in the parent's panel.
+  useEffect(
+    () => registerEmbeddedPanelHost(childRef, props.parentRef),
+    [childRef, props.parentRef],
+  );
   if (shell === null || gone) return null;
   return (
     <ComposerHandleContext value={composerRef}>
       <ChatView
         embedded
-        panelOwnerRef={props.parentRef}
         routeKind="server"
         environmentId={props.parentRef.environmentId}
         threadId={props.threadId}
