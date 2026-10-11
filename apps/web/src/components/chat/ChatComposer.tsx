@@ -4063,6 +4063,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       if (item.type === "slash-command") {
         if ((item.command === "side" || item.command === "btw") && onSideChatCommand) {
+          // The menu hides these unless they can run, but a stale item can still be
+          // picked after the draft changes. Then keep the command as plain text.
+          if (trigger.rangeStart !== 0 || composerHasNonPromptContent) {
+            const replacement = `/${item.command} `;
+            const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+              snapshot.value,
+              trigger.rangeEnd,
+              replacement,
+            );
+            const applied = applyPromptReplacement(
+              trigger.rangeStart,
+              replacementRangeEnd,
+              replacement,
+              { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+            );
+            if (applied) setComposerHighlightedItemId(null);
+            return;
+          }
           // `/btw` waits for a question; `/side` opens right away.
           const opensNow = item.command === "side";
           const replacement = opensNow ? "" : "/btw ";
@@ -4214,6 +4232,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       planModeUiEnabled,
       onUsageLimitsCommand,
       onSideChatCommand,
+      composerHasNonPromptContent,
       resolveActiveComposerTrigger,
     ],
   );
